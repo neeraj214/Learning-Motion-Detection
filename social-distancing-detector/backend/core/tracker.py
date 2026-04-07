@@ -15,13 +15,13 @@ class CentroidTracker:
         self.disappeared = OrderedDict()
         self.max_disappeared = max_disappeared
 
-    def register(self, centroid: np.ndarray):
+    def register(self, centroid: np.ndarray) -> None:
         """Adds a new object to track."""
         self.objects[self.next_id] = centroid
         self.disappeared[self.next_id] = 0
         self.next_id += 1
 
-    def deregister(self, object_id: int):
+    def deregister(self, object_id: int) -> None:
         """Removes an object from tracking."""
         if object_id in self.objects:
             del self.objects[object_id]
@@ -60,36 +60,38 @@ class CentroidTracker:
 
         # --- Match existing objects to new centroids ---
         object_ids = list(self.objects.keys())
-        object_centroids = list(self.objects.values())
+        object_centroids = np.array(list(self.objects.values()))
 
-        # Calculate distances between existing objects and new centroids
+        # Build distance matrix (shape: num_tracked, num_input)
         # Using pure numpy broadcasting to calculate Euclidean distance matrix
-        # (Equivalent to scipy.spatial.distance.cdist)
-        D = np.linalg.norm(np.array(object_centroids)[:, np.newaxis] - input_centroids, axis=2)
+        # (Fulfills 'numpy only' while being equivalent to scipy.spatial.distance.cdist)
+        # D[i, j] = distance(object_centroids[i], input_centroids[j])
+        D = np.linalg.norm(object_centroids[:, np.newaxis] - input_centroids, axis=2)
 
-        # To perform the greedy matching, we need to find the smallest distance 
-        # for each object (row) and input centroid (column)
+        # To perform the greedy matching:
+        # Sort rows by minimum distance (closest existing object first)
         rows = D.min(axis=1).argsort()
+        # Find the column index for each row (the best input centroid match)
         cols = D.argmin(axis=1)[rows]
 
         used_rows = set()
         used_cols = set()
 
         for (row, col) in zip(rows, cols):
-            # Skip if we already examined these indices
+            # Skip if row or col already matched
             if row in used_rows or col in used_cols:
                 continue
             
-            # --- Check distance threshold (80px) ---
+            # Distance threshold of 80px: if best match is too far, skip.
             if D[row, col] > 80:
                 continue
 
-            # Update tracked object's centroid and reset disappeared count
+            # Matched pair: update centroid and reset disappeared count
             object_id = object_ids[row]
             self.objects[object_id] = input_centroids[col]
             self.disappeared[object_id] = 0
 
-            # Mark as examined
+            # Mark indices as used
             used_rows.add(row)
             used_cols.add(col)
 
@@ -101,7 +103,7 @@ class CentroidTracker:
             if self.disappeared[object_id] > self.max_disappeared:
                 self.deregister(object_id)
 
-        # --- Register new objects from unused centroids ---
+        # --- Register new objects from unused input centroids ---
         unused_cols = set(range(0, D.shape[1])).difference(used_cols)
         for col in unused_cols:
             self.register(input_centroids[col])
@@ -110,24 +112,25 @@ class CentroidTracker:
 
 if __name__ == "__main__":
     # --- SMOKE TEST ---
-    tracker = CentroidTracker()
+    print("[INFO] Starting CentroidTracker smoke test...")
+    tracker = CentroidTracker(max_disappeared=40)
     
     # Frame 1: Three initial people
-    print("\n[FRAME 1] Initial detection:")
+    print("\n[FRAME 1] Detections: 3 new objects")
     f1_boxes = [(10, 10, 50, 50), (200, 200, 40, 40), (400, 50, 60, 60)]
     objects = tracker.update(f1_boxes)
     for obj_id, centroid in objects.items():
         print(f"ID {obj_id}: {centroid}")
 
     # Frame 2: Objects moved slightly
-    print("\n[FRAME 2] Movement:")
+    print("\n[FRAME 2] Movement: IDs should persist")
     f2_boxes = [(15, 12, 50, 50), (210, 205, 40, 40), (410, 55, 60, 60)]
     objects = tracker.update(f2_boxes)
     for obj_id, centroid in objects.items():
         print(f"ID {obj_id}: {centroid}")
 
     # Frame 3: One object disappeared
-    print("\n[FRAME 3] One item gone:")
+    print("\n[FRAME 3] 1 object gone: IDs for remaining 2 should persist")
     f3_boxes = [(20, 15, 52, 52), (220, 210, 40, 40)]
     objects = tracker.update(f3_boxes)
     for obj_id, centroid in objects.items():
