@@ -80,20 +80,15 @@ class Detector:
         Returns
         -------
         dict[int, tuple[int,int,int,int]]
-            Mapping of persistent object ID → (x, y, w, h) bounding box.
-            IDs survive across frames as long as the object remains visible.
+            Mapping of persistent object ID -> (x, y, w, h) bounding box.
         """
         boxes       = self.process_frame(frame)
-        id_centroid = self.tracker.update(boxes)  # dict[int, np.ndarray(cx,cy)]
+        id_centroid = self.tracker.update(boxes)
 
-        # Map each tracked centroid back to the closest detected bounding box.
-        # Strategy: for each ID, find the box whose own centroid is nearest.
         id_to_box: dict[int, tuple[int, int, int, int]] = {}
-
         if not boxes:
             return id_to_box
 
-        # Pre-compute box centroids
         box_centroids = np.array(
             [(x + w // 2, y + h // 2) for (x, y, w, h) in boxes], dtype="float"
         )
@@ -104,6 +99,67 @@ class Detector:
             id_to_box[obj_id] = boxes[best]
 
         return id_to_box
+
+    def find_violations(self, id_to_box: dict) -> list[tuple[int, int]]:
+        """Return pairs of object IDs that are too close together."""
+        items = list(id_to_box.items())
+        violations = []
+        for i in range(len(items)):
+            for j in range(i + 1, len(items)):
+                id_a, (xa, ya, wa, ha) = items[i]
+                id_b, (xb, yb, wb, hb) = items[j]
+                cx_a, cy_a = xa + wa // 2, ya + ha // 2
+                cx_b, cy_b = xb + wb // 2, yb + hb // 2
+                dist = np.sqrt((cx_a - cx_b) ** 2 + (cy_a - cy_b) ** 2)
+                if dist < settings.DISTANCE_THRESHOLD_PX:
+                    violations.append((id_a, id_b))
+        return violations
+
+    def annotate_frame(
+        self,
+        frame: np.ndarray,
+        id_to_box: dict,
+        violations: list,
+        fps: float = 0.0
+    ) -> np.ndarray:
+        """Draw bounding boxes, IDs, violation lines, and HUD onto the frame."""
+        violation_ids = {uid for pair in violations for uid in pair}
+
+        for obj_id, (x, y, w, h) in id_to_box.items():
+            color = (0, 0, 255) if obj_id in violation_ids else (0, 255, 0)
+            cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
+            cv2.putText(
+                frame, f"ID {obj_id}", (x, max(y - 8, 12)),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 2
+            )
+
+        for (id_a, id_b) in violations:
+            (xa, ya, wa, ha) = id_to_box[id_a]
+            (xb, yb, wb, hb) = id_to_box[id_b]
+            pt_a = (xa + wa // 2, ya + ha // 2)
+            pt_b = (xb + wb // 2, yb + hb // 2)
+            cv2.line(frame, pt_a, pt_b, (0, 0, 255), 2)
+
+        # HUD
+        status_text  = f"VIOLATIONS: {len(violations)}" if violations else "SAFE"
+        status_color = (0, 0, 255) if violations else (0, 200, 0)
+        cv2.putText(frame, status_text, (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, status_color, 2)
+        cv2.putText(
+            frame, f"FPS: {fps:.1f}  People: {len(id_to_box)}", (10, 60),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 2
+        )
+        return frame
+
+    def process_frame_full(self, frame: np.ndarray, fps: float = 0.0) -> tuple[np.ndarray, dict, list]:
+        """
+        Convenience method: runs detection + tracking + violation check + annotation.
+        Returns (annotated_frame, id_to_box, violations).
+        """
+        id_to_box  = self.process_frame_with_ids(frame)
+        violations = self.find_violations(id_to_box)
+        annotated  = self.annotate_frame(frame.copy(), id_to_box, violations, fps)
+        return annotated, id_to_box, violations
 
 
 # ─────────────────────────────────────────────
@@ -129,31 +185,17 @@ if __name__ == "__main__":
 
         frame_count += 1
 
-        # Get tracked IDs → boxes
-        id_to_box = detector.process_frame_with_ids(frame)
-
-        # Draw bounding boxes and persistent IDs
-        for obj_id, (x, y, w, h) in id_to_box.items():
-            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-            cv2.putText(frame, f"ID {obj_id}", (x, y - 8),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-            # Mark centroid
-            cx, cy = x + w // 2, y + h // 2
-            cv2.circle(frame, (cx, cy), 4, (255, 0, 0), -1)
+        # Full pipeline integration
+        annotated_frame, id_to_box, violations = detector.process_frame_full(frame, fps)
 
         # FPS display every 30 frames
         if frame_count % 30 == 0:
             elapsed   = time.time() - fps_timer
             fps       = 30 / elapsed if elapsed > 0 else 0.0
             fps_timer = time.time()
-            print(f"[FPS] {fps:.1f}  |  Active IDs: {list(id_to_box.keys())}")
+            print(f"[FPS] {fps:.1f}  |  Active IDs: {list(id_to_box.keys())}  |  Violations: {len(violations)}")
 
-        cv2.putText(frame, f"FPS: {fps:.1f}", (10, 25),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (200, 200, 200), 2)
-        cv2.putText(frame, f"IDs: {list(id_to_box.keys())}", (10, 55),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-
-        cv2.imshow("Social Distancing – Tracker Smoke Test", frame)
+        cv2.imshow("Social Distancing – Unified Pipeline Test", annotated_frame)
         if cv2.waitKey(1) & 0xFF == ord("q"):
             break
 
