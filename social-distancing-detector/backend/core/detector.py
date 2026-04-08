@@ -75,28 +75,35 @@ class Detector:
     # ─────────────────────────────────────────────
     def process_frame_with_ids(self, frame: np.ndarray) -> dict[int, tuple[int, int, int, int]]:
         """
-        Full pipeline chained with CentroidTracker.
-
-        Returns
-        -------
-        dict[int, tuple[int,int,int,int]]
-            Mapping of persistent object ID -> (x, y, w, h) bounding box.
+        Full pipeline: detect boxes -> update tracker -> match IDs back to boxes.
+        Returns { id: (x, y, w, h) }.
         """
-        boxes       = self.process_frame(frame)
-        id_centroid = self.tracker.update(boxes)
+        # 1. Get detected boxes
+        boxes = self.process_frame(frame)
+        
+        # 2. Update tracker to get { id: centroid }
+        id_to_centroid = self.tracker.update(boxes)
 
+        # 3. Match each tracked ID back to its box by centroid distance
         id_to_box: dict[int, tuple[int, int, int, int]] = {}
-        if not boxes:
+        
+        if not boxes or not id_to_centroid:
             return id_to_box
 
-        box_centroids = np.array(
+        # Pre-compute centroids for detection boxes
+        detection_centroids = np.array(
             [(x + w // 2, y + h // 2) for (x, y, w, h) in boxes], dtype="float"
         )
 
-        for obj_id, centroid in id_centroid.items():
-            dists = np.linalg.norm(box_centroids - centroid.astype("float"), axis=1)
-            best  = int(np.argmin(dists))
-            id_to_box[obj_id] = boxes[best]
+        for obj_id, centroid in id_to_centroid.items():
+            # Calculate distances between this tracked centroid and all current detections
+            dists = np.linalg.norm(detection_centroids - centroid.astype("float"), axis=1)
+            best_idx = int(np.argmin(dists))
+            
+            # 4. Filter by distance: if the closest box is too far (> 100px), 
+            # consider the object "currently not matched to a box" (e.g., disappeared)
+            if dists[best_idx] < 100:
+                id_to_box[obj_id] = boxes[best_idx]
 
         return id_to_box
 
@@ -163,7 +170,7 @@ class Detector:
 
 
 # ─────────────────────────────────────────────
-# ENHANCED SMOKE TEST – live webcam with IDs
+# REFINED SMOKE TEST – live webcam test loop
 # ─────────────────────────────────────────────
 if __name__ == "__main__":
     cap = cv2.VideoCapture(0)
@@ -176,29 +183,43 @@ if __name__ == "__main__":
     fps_timer   = time.time()
     fps         = 0.0
 
-    print("[INFO] Starting enhanced smoke test – press 'q' to quit.")
+    print("[INFO] Starting smoke test (max 200 frames) – press 'q' to quit.")
 
-    while True:
+    while frame_count < 200:
         ret, frame = cap.read()
         if not ret:
             break
 
         frame_count += 1
 
-        # Full pipeline integration
-        annotated_frame, id_to_box, violations = detector.process_frame_full(frame, fps)
+        # 1. Process frame to get tracked objects
+        id_to_box = detector.process_frame_with_ids(frame)
 
-        # FPS display every 30 frames
+        # 2. Draw each bounding box and person ID
+        for obj_id, (x, y, w, h) in id_to_box.items():
+            # Green box
+            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+            # Person ID text above box
+            cv2.putText(frame, f"Person {obj_id}", (x, max(y - 10, 20)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+
+        # 3. FPS Calculation every 30 frames
         if frame_count % 30 == 0:
             elapsed   = time.time() - fps_timer
             fps       = 30 / elapsed if elapsed > 0 else 0.0
             fps_timer = time.time()
-            print(f"[FPS] {fps:.1f}  |  Active IDs: {list(id_to_box.keys())}  |  Violations: {len(violations)}")
+            print(f"[STATUS] Frame: {frame_count}/200 | FPS: {fps:.1f} | Tracking: {len(id_to_box)}")
 
-        cv2.imshow("Social Distancing – Unified Pipeline Test", annotated_frame)
+        # 4. Display result
+        cv2.putText(frame, f"FPS: {fps:.1f}", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        cv2.imshow("Detector Test", frame)
+
         if cv2.waitKey(1) & 0xFF == ord("q"):
+            print("[INFO] Quit signal received.")
             break
 
+    # Cleanup
     cap.release()
     cv2.destroyAllWindows()
-    print("[INFO] Smoke test complete.")
+    print(f"[INFO] Smoke test complete. Processed {frame_count} frames.")
