@@ -52,22 +52,6 @@ _detection_state = {
 # ─────────────────────────────────────────────
 # VIOLATION DETECTION HELPER
 # ─────────────────────────────────────────────
-def _find_violations(id_to_box: dict) -> list[tuple[int, int]]:
-    """
-    Return pairs of IDs whose centroids are closer than DISTANCE_THRESHOLD_PX.
-    """
-    items = list(id_to_box.items())
-    violations = []
-    for i in range(len(items)):
-        for j in range(i + 1, len(items)):
-            id_a, (xa, ya, wa, ha) = items[i]
-            id_b, (xb, yb, wb, hb) = items[j]
-            cx_a, cy_a = xa + wa // 2, ya + ha // 2
-            cx_b, cy_b = xb + wb // 2, yb + hb // 2
-            dist = np.sqrt((cx_a - cx_b) ** 2 + (cy_a - cy_b) ** 2)
-            if dist < settings.DISTANCE_THRESHOLD_PX:
-                violations.append((id_a, id_b))
-    return violations
 
 
 # ─────────────────────────────────────────────
@@ -104,38 +88,15 @@ def _camera_worker(camera_index: int = 0):
 
         frame_count += 1
 
-        # ── Detection + Tracking ──────────────────────────────────────────
-        id_to_box  = detector.process_frame_with_ids(frame)
-        violations = _find_violations(id_to_box)
-        violation_ids = {uid for pair in violations for uid in pair}
+        # ── Detect + Track + Annotate ─────────────────────────────────────
+        # process_frame_full returns (annotated_frame, id_to_box, violations)
+        annotated_frame, id_to_box, violations = detector.process_frame_full(frame, fps)
 
-        # ── Annotation ───────────────────────────────────────────────────
-        for obj_id, (x, y, w, h) in id_to_box.items():
-            color = (0, 0, 255) if obj_id in violation_ids else (0, 255, 0)
-            cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
-            cv2.putText(frame, f"ID {obj_id}", (x, y - 8),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 2)
-
-        # Draw distance lines between violating pairs
-        for (id_a, id_b) in violations:
-            (xa, ya, wa, ha) = id_to_box[id_a]
-            (xb, yb, wb, hb) = id_to_box[id_b]
-            pt_a = (xa + wa // 2, ya + ha // 2)
-            pt_b = (xb + wb // 2, yb + hb // 2)
-            cv2.line(frame, pt_a, pt_b, (0, 0, 255), 2)
-
-        # HUD
+        # ── FPS computation ───────────────────────────────────────────────
         if frame_count % 30 == 0:
             elapsed   = time.time() - fps_timer
             fps       = 30 / elapsed if elapsed > 0 else 0.0
             fps_timer = time.time()
-
-        status_text  = f"Violations: {len(violations)}" if violations else "OK"
-        status_color = (0, 0, 255) if violations else (0, 200, 0)
-        cv2.putText(frame, status_text, (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, status_color, 2)
-        cv2.putText(frame, f"FPS: {fps:.1f}  People: {len(id_to_box)}", (10, 60),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 2)
 
         # ── Publish ──────────────────────────────────────────────────────
         with _state_lock:
@@ -143,7 +104,7 @@ def _camera_worker(camera_index: int = 0):
             _detection_state["violation_pairs"]  = violations
             _detection_state["fps"]              = round(fps, 1)
 
-        _, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
+        _, jpeg = cv2.imencode(".jpg", annotated_frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
         with _frame_lock:
             _latest_frame = jpeg.tobytes()
 
