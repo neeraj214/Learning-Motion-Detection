@@ -30,61 +30,6 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────
 # HELPERS
 # ─────────────────────────────────────────────
-def find_violations(id_to_box: dict) -> list[tuple[int, int]]:
-    """Return pairs of object IDs that are too close together."""
-    items = list(id_to_box.items())
-    violations = []
-    for i in range(len(items)):
-        for j in range(i + 1, len(items)):
-            id_a, (xa, ya, wa, ha) = items[i]
-            id_b, (xb, yb, wb, hb) = items[j]
-            cx_a, cy_a = xa + wa // 2, ya + ha // 2
-            cx_b, cy_b = xb + wb // 2, yb + hb // 2
-            dist = np.sqrt((cx_a - cx_b) ** 2 + (cy_a - cy_b) ** 2)
-            if dist < settings.DISTANCE_THRESHOLD_PX:
-                violations.append((id_a, id_b))
-    return violations
-
-
-def annotate_frame(
-    frame: np.ndarray,
-    id_to_box: dict,
-    violations: list,
-    fps: float,
-) -> np.ndarray:
-    """Draw bounding boxes, IDs, violation lines, and HUD onto the frame."""
-    violation_ids = {uid for pair in violations for uid in pair}
-
-    for obj_id, (x, y, w, h) in id_to_box.items():
-        color = (0, 0, 255) if obj_id in violation_ids else (0, 255, 0)
-        cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
-        cv2.putText(
-            frame, f"ID {obj_id}", (x, max(y - 8, 12)),
-            cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 2,
-        )
-
-    for (id_a, id_b) in violations:
-        (xa, ya, wa, ha) = id_to_box[id_a]
-        (xb, yb, wb, hb) = id_to_box[id_b]
-        pt_a = (xa + wa // 2, ya + ha // 2)
-        pt_b = (xb + wb // 2, yb + hb // 2)
-        cv2.line(frame, pt_a, pt_b, (0, 0, 255), 2)
-
-    # HUD
-    status_text  = f"VIOLATIONS: {len(violations)}" if violations else "SAFE"
-    status_color = (0, 0, 255) if violations else (0, 200, 0)
-    cv2.putText(frame, status_text, (10, 30),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.9, status_color, 2)
-    cv2.putText(
-        frame,
-        f"FPS: {fps:.1f}   People tracked: {len(id_to_box)}",
-        (10, 62),
-        cv2.FONT_HERSHEY_SIMPLEX, 0.65, (200, 200, 200), 2,
-    )
-    ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    cv2.putText(frame, ts, (10, frame.shape[0] - 10),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (150, 150, 150), 1)
-    return frame
 
 
 # ─────────────────────────────────────────────
@@ -119,8 +64,10 @@ def run(camera_index: int = 0, headless: bool = False):
         frame_count += 1
 
         # ── Detect + Track ────────────────────────────────────────────────
-        id_to_box  = detector.process_frame_with_ids(frame)
-        violations = find_violations(id_to_box)
+        # ── Detect + Track + Annotate ─────────────────────────────────────
+        # process_frame_full returns (annotated_frame, id_to_map, violations)
+        # We pass the latest calculated FPS for the HUD.
+        annotated_frame, id_to_box, violations = detector.process_frame_full(frame, fps)
 
         # ── FPS computation ───────────────────────────────────────────────
         if frame_count % 30 == 0:
@@ -144,8 +91,12 @@ def run(camera_index: int = 0, headless: bool = False):
 
         # ── Visual output (skip in headless mode) ─────────────────────────
         if not headless:
-            annotate_frame(frame, id_to_box, violations, fps)
-            cv2.imshow("Social Distancing Detector", frame)
+            # We must draw the current timestamp as it is not in the core Detector annotation
+            ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            cv2.putText(annotated_frame, ts, (10, annotated_frame.shape[0] - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (150, 150, 150), 1)
+
+            cv2.imshow("Social Distancing Detector", annotated_frame)
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 logger.info("Quit signal received.")
                 break
