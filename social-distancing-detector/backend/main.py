@@ -64,10 +64,9 @@ def run(camera_index: int = 0, headless: bool = False):
         frame_count += 1
 
         # ── Detect + Track ────────────────────────────────────────────────
-        # ── Detect + Track + Annotate ─────────────────────────────────────
-        # process_frame_full returns (annotated_frame, id_to_map, violations)
+        # process_frame_full returns (annotated_frame, id_to_box, violations, alarm_state)
         # We pass the latest calculated FPS for the HUD.
-        annotated_frame, id_to_box, violations = detector.process_frame_full(frame, fps)
+        annotated_frame, id_to_box, violations, alarm_state = detector.process_frame_full(frame, fps)
 
         # ── FPS computation ───────────────────────────────────────────────
         if frame_count % 30 == 0:
@@ -80,10 +79,10 @@ def run(camera_index: int = 0, headless: bool = False):
             )
 
         # ── Alarm: print & cooldown ───────────────────────────────────────
-        if violations and alarm_cooldown <= 0:
+        if alarm_state == "alarm" and alarm_cooldown <= 0:
             logger.warning(
-                "⚠ SOCIAL DISTANCING VIOLATION – IDs too close: %s",
-                violations,
+                "⚠ SOCIAL DISTANCING VIOLATION – State: %s | Violations: %d",
+                alarm_state.upper(), len(violations)
             )
             alarm_cooldown = settings.ALARM_COOLDOWN_FRAMES
         if alarm_cooldown > 0:
