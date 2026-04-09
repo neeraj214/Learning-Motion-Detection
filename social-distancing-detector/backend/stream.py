@@ -46,6 +46,7 @@ _state_lock = threading.Lock()
 _detection_state = {
     "active_ids": [],
     "violation_pairs": [],
+    "alarm_state": "safe",
     "fps": 0.0,
 }
 
@@ -89,8 +90,8 @@ def _camera_worker(camera_index: int = 0):
         frame_count += 1
 
         # ── Detect + Track + Annotate ─────────────────────────────────────
-        # process_frame_full returns (annotated_frame, id_to_box, violations)
-        annotated_frame, id_to_box, violations = detector.process_frame_full(frame, fps)
+        # process_frame_full returns (annotated_frame, id_to_box, violations, alarm_state)
+        annotated_frame, id_to_box, violations, alarm_state = detector.process_frame_full(frame, fps)
 
         # ── FPS computation ───────────────────────────────────────────────
         if frame_count % 30 == 0:
@@ -102,6 +103,7 @@ def _camera_worker(camera_index: int = 0):
         with _state_lock:
             _detection_state["active_ids"]       = list(id_to_box.keys())
             _detection_state["violation_pairs"]  = violations
+            _detection_state["alarm_state"]      = alarm_state
             _detection_state["fps"]              = round(fps, 1)
 
         _, jpeg = cv2.imencode(".jpg", annotated_frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
