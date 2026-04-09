@@ -3,6 +3,7 @@ import numpy as np
 import time
 from .config import settings
 from .tracker import CentroidTracker
+from .distancing import DistanceChecker, AlarmStateMachine
 
 
 class Detector:
@@ -15,6 +16,8 @@ class Detector:
         )
         self.kernel  = np.ones(settings.MORPH_KERNEL_SIZE, np.uint8)
         self.tracker = CentroidTracker(max_disappeared=40)
+        self.distancer = DistanceChecker()
+        self.alarm_mgr = AlarmStateMachine()
 
     # ─────────────────────────────────────────────
     # LOW-LEVEL PIPELINE STEPS
@@ -107,26 +110,12 @@ class Detector:
 
         return id_to_box
 
-    def find_violations(self, id_to_box: dict) -> list[tuple[int, int]]:
-        """Return pairs of object IDs that are too close together."""
-        items = list(id_to_box.items())
-        violations = []
-        for i in range(len(items)):
-            for j in range(i + 1, len(items)):
-                id_a, (xa, ya, wa, ha) = items[i]
-                id_b, (xb, yb, wb, hb) = items[j]
-                cx_a, cy_a = xa + wa // 2, ya + ha // 2
-                cx_b, cy_b = xb + wb // 2, yb + hb // 2
-                dist = np.sqrt((cx_a - cx_b) ** 2 + (cy_a - cy_b) ** 2)
-                if dist < settings.DISTANCE_THRESHOLD_PX:
-                    violations.append((id_a, id_b))
-        return violations
-
     def annotate_frame(
         self,
         frame: np.ndarray,
         id_to_box: dict,
         violations: list,
+        alarm_state: str = "safe",
         fps: float = 0.0
     ) -> np.ndarray:
         """Draw bounding boxes, IDs, violation lines, and HUD onto the frame."""
@@ -140,7 +129,7 @@ class Detector:
                 cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 2
             )
 
-        for (id_a, id_b) in violations:
+        for (id_a, id_b, _) in violations:
             (xa, ya, wa, ha) = id_to_box[id_a]
             (xb, yb, wb, hb) = id_to_box[id_b]
             pt_a = (xa + wa // 2, ya + ha // 2)
@@ -148,25 +137,42 @@ class Detector:
             cv2.line(frame, pt_a, pt_b, (0, 0, 255), 2)
 
         # HUD
-        status_text  = f"VIOLATIONS: {len(violations)}" if violations else "SAFE"
-        status_color = (0, 0, 255) if violations else (0, 200, 0)
-        cv2.putText(frame, status_text, (10, 30),
+        status_text  = alarm_state.upper()
+        if alarm_state == "alarm":
+            status_color = (0, 0, 255)   # Red
+        elif alarm_state == "warning":
+            status_color = (0, 165, 255) # Orange
+        else:
+            status_color = (0, 200, 0)   # Green
+
+        cv2.putText(frame, f"STATE: {status_text}", (10, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, status_color, 2)
         cv2.putText(
-            frame, f"FPS: {fps:.1f}  People: {len(id_to_box)}", (10, 60),
+            frame, f"FPS: {fps:.1f}  People: {len(id_to_box)}  Violations: {len(violations)}", (10, 60),
             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 2
         )
         return frame
 
-    def process_frame_full(self, frame: np.ndarray, fps: float = 0.0) -> tuple[np.ndarray, dict, list]:
+    def process_frame_full(self, frame: np.ndarray, fps: float = 0.0) -> tuple:
         """
-        Convenience method: runs detection + tracking + violation check + annotation.
-        Returns (annotated_frame, id_to_box, violations).
+        Convenience method: runs detection + tracking + violation check + alarm check + annotation.
+        Returns (annotated_frame, id_to_box, violations, alarm_state).
         """
-        id_to_box  = self.process_frame_with_ids(frame)
-        violations = self.find_violations(id_to_box)
-        annotated  = self.annotate_frame(frame.copy(), id_to_box, violations, fps)
-        return annotated, id_to_box, violations
+        # 1. Pipeline: Detect + Track
+        id_to_box = self.process_frame_with_ids(frame)
+        
+        # 2. Distance analysis
+        dist_results = self.distancer.check_frame(id_to_box)
+        violations   = dist_results["violations"]
+        
+        # 3. Alarm State Smoothing
+        alarm_data  = self.alarm_mgr.update(len(violations))
+        alarm_state = alarm_data["state"]
+
+        # 4. Annotation
+        annotated = self.annotate_frame(frame.copy(), id_to_box, violations, alarm_state, fps)
+        
+        return annotated, id_to_box, violations, alarm_state
 
 
 # ─────────────────────────────────────────────
