@@ -66,22 +66,73 @@ class DistanceChecker:
             "violating_ids": violating_ids,
         }
 
+class AlarmStateMachine:
+    def __init__(self):
+        self.state: str = "safe"          # "safe" | "warning" | "alarm"
+        self.violation_frames: int = 0    # consecutive frames with violations
+        self.clear_frames: int = 0        # consecutive frames without violations
+        self.total_violations: int = 0    # cumulative violation events (never resets)
+        self.cooldown: int = settings.ALARM_COOLDOWN_FRAMES
+
+        # Thresholds (hardcoded, not in config)
+        self.WARN_THRESHOLD = 3     # frames with violations before entering "warning"
+        self.ALARM_THRESHOLD = 8    # frames with violations before entering "alarm"
+        self.CLEAR_THRESHOLD = 15   # consecutive clear frames before downgrading state
+
+    def update(self, violation_count: int) -> dict:
+        """
+        Logic to smooth out noisy violation signals into a stable state.
+        """
+        if violation_count > 0:
+            self.violation_frames += 1
+            self.clear_frames = 0
+            
+            if self.violation_frames >= self.ALARM_THRESHOLD:
+                self.state = "alarm"
+                self.total_violations += violation_count
+            elif self.violation_frames >= self.WARN_THRESHOLD:
+                self.state = "warning"
+        else:
+            self.clear_frames += 1
+            self.violation_frames = 0
+            
+            if self.clear_frames >= self.CLEAR_THRESHOLD:
+                self.state = "safe"
+
+        return {
+            "state": self.state,
+            "violation_frames": self.violation_frames,
+            "clear_frames": self.clear_frames,
+            "total_violations": self.total_violations,
+        }
+
+    def reset(self) -> None:
+        """Resets all state back to initial values except total_violations."""
+        self.state = "safe"
+        self.violation_frames = 0
+        self.clear_frames = 0
+
 if __name__ == "__main__":
-    checker = DistanceChecker()
+    asm = AlarmStateMachine()
     
-    # Mock tracked dict with 3 people:
-    # IDs 0 and 1 are close; ID 2 is far away
-    mock_tracked = {
-        0: (50, 50, 40, 80), 
-        1: (80, 60, 40, 80), 
-        2: (400, 400, 40, 80)
-    }
-    
-    result = checker.check_frame(mock_tracked)
-    
-    print("Result:", result)
-    
-    # Assertions
-    assert result["violation_count"] == 1
-    assert result["violating_ids"] == {0, 1}
-    print("Smoke test passed!")
+    print("--- Simulating Violations (10 frames) ---")
+    for i in range(1, 11):
+        res = asm.update(violation_count=2)
+        print(f"Frame {i:02d}: {res['state']} (v_frames={res['violation_frames']}, total_v={res['total_violations']})")
+        
+        # Confirm transitions
+        if i == asm.WARN_THRESHOLD:
+            assert res["state"] == "warning"
+        if i == asm.ALARM_THRESHOLD:
+            assert res["state"] == "alarm"
+
+    print("\n--- Simulating Clear Frames (20 frames) ---")
+    for i in range(1, 21):
+        res = asm.update(violation_count=0)
+        print(f"Frame {i:02d}: {res['state']} (c_frames={res['clear_frames']})")
+        
+        # Confirm recovery
+        if i == asm.CLEAR_THRESHOLD:
+            assert res["state"] == "safe"
+
+    print("\nSmoke test passed!")
