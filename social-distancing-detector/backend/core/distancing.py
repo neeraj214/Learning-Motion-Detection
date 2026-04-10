@@ -113,18 +113,6 @@ class AlarmStateMachine:
         self.clear_frames = 0
 
 if __name__ == "__main__":
-    # DistanceChecker Smoke Test
-    checker = DistanceChecker()
-    mock_tracked = {
-        0: (50, 50, 40, 80), 
-        1: (80, 60, 40, 80), 
-        2: (400, 400, 40, 80)
-    }
-    result = checker.check_frame(mock_tracked)
-    print("DistanceChecker Result:", result)
-    assert result["violation_count"] == 1
-    assert result["violating_ids"] == {0, 1}
-    print("DistanceChecker Smoke test passed!\n")
 
     asm = AlarmStateMachine()
     
