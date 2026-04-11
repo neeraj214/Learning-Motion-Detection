@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
 import itertools
-from backend.core.config import settings
+from .config import settings
 
 class DistanceChecker:
     def __init__(self):
