@@ -5,8 +5,8 @@ import time
 import asyncio
 from typing import AsyncGenerator
 
-from .core.config import settings
-from .pipeline import pipeline
+from core.config import settings
+from pipeline import pipeline
 
 class CameraManager:
     def __init__(self):
