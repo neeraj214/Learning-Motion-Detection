@@ -1,7 +1,7 @@
 import numpy as np
 
-from .core.detector import Detector
-from .core.distancing import DistanceChecker, AlarmStateMachine, Annotator
+from core.detector import Detector
+from core.distancing import DistanceChecker, AlarmStateMachine, Annotator
 
 class FramePipeline:
     def __init__(self):
