@@ -2,8 +2,11 @@ import cv2
 import threading
 import numpy as np
 import time
+import asyncio
+from typing import AsyncGenerator
 
 from .core.config import settings
+from .pipeline import pipeline
 
 class CameraManager:
     def __init__(self):
@@ -51,6 +54,31 @@ class CameraManager:
         return self._running
 
 camera = CameraManager()
+
+async def generate_mjpeg() -> AsyncGenerator[bytes, None]:
+    if not camera.is_running():
+        camera.start()
+        
+    while True:
+        frame = camera.read_frame()
+        if frame is None:
+            await asyncio.sleep(0.01)
+            continue
+            
+        annotated, stats = pipeline.process(frame)
+        
+        ret, buffer = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        if not ret:
+            continue
+            
+        yield (
+            b"--frame\r\n"
+            b"Content-Type: image/jpeg\r\n\r\n"
+            + buffer.tobytes()
+            + b"\r\n"
+        )
+        
+        await asyncio.sleep(1/30)
 
 if __name__ == "__main__":
     camera.start()
