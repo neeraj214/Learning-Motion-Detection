@@ -61,42 +61,54 @@ A modular people-tracking and social distancing violation detection system.
 | Path | `social-distancing-detector/` |
 |------|------------------------------|
 | Backend | FastAPI (Python) |
-| Frontend | React (scaffold) |
+| Frontend | React (Vite) + Tailwind CSS |
 | Algorithm | MOG2 + NMS + CentroidTracker |
 
 **Architecture**
 
 ```
 social-distancing-detector/
-└── backend/
-    ├── main.py          ← CLI entry point (windowed / headless)
-    ├── stream.py        ← FastAPI MJPEG + JSON status API
-    ├── requirements.txt
-    └── core/
-        ├── config.py    ← Settings dataclass
-        ├── detector.py  ← Detector (MOG2 + NMS + process_frame_with_ids)
-        └── tracker.py   ← CentroidTracker (persistent IDs across frames)
+├── backend/            ← FastAPI + detector + tracker
+│   ├── main.py         ← CLI entry point (windowed / headless)
+│   ├── stream.py       ← FastAPI MJPEG + JSON status API
+│   ├── requirements.txt
+│   └── core/
+│       ├── config.py    ← Settings dataclass
+│       ├── detector.py  ← Detector (MOG2 + NMS + process_frame_with_ids)
+│       └── tracker.py   ← CentroidTracker (persistent IDs across frames)
+└── frontend/           ← React (Vite) + Tailwind UI
+    ├── src/
+    │   ├── components/ ← StatusBanner, StatsPanel
+    │   ├── hooks/      ← useSSE (real-time events)
+    │   ├── config.js   ← API endpoint configuration
+    │   └── App.jsx     ← Main UI assembly (Phase 5)
+    └── tailwind.config.js
 ```
 
 **Key Features**
-- `CentroidTracker`: persistent object IDs across frames using greedy Euclidean matching
-- `Detector.process_frame_with_ids`: chains detection → tracking, returns `{ID: (x,y,w,h)}`
-- Social distancing violation detection: flags pairs of people below `DISTANCE_THRESHOLD_PX`
-- FastAPI streaming server (`/video_feed` MJPEG, `/status` JSON)
-- Alarm cooldown to prevent log spam
-- CLI runner with `--camera` and `--headless` flags
+- `CentroidTracker`: persistent object IDs across frames using greedy Euclidean matching.
+- `Detector.process_frame_with_ids`: chains detection → tracking, returns `{ID: (x,y,w,h)}`.
+- Social distancing violation detection: flags pairs of people below `DISTANCE_THRESHOLD_PX`.
+- FastAPI streaming server (`/video_feed` MJPEG, `/events` SSE).
+- **Real-time Frontend**:
+  - `useSSE` hook for live data synchronization with the backend.
+  - `StatusBanner`: Dynamic color-coded alerts (Safe/Warning/Alarm).
+  - `StatsPanel`: 2x2 dashboard grid for tracking metrics.
+- Alarm cooldown to prevent log spam.
+- CLI runner with `--camera` and `--headless` flags.
 
 **Running**
 
 ```bash
+# Backend
 cd social-distancing-detector/backend
 pip install -r requirements.txt
+python -m backend.stream  # runs on http://localhost:8000
 
-# Option A: windowed CLI (shows OpenCV window)
-python -m backend.main
-
-# Option B: headless server (MJPEG + JSON API on :8000)
-python -m backend.stream
+# Frontend
+cd ../frontend
+npm install
+npm run dev               # runs on http://localhost:5173
 ```
 
 ---
@@ -110,7 +122,8 @@ python -m backend.stream
 | NumPy | Both projects |
 | Flask + Flask-CORS | Background Subtraction Demo |
 | FastAPI + Uvicorn | Social Distancing Detector |
-| React | Both frontends |
+| React (CRA/Vite) | Both frontends |
+| Tailwind CSS | Social Distancing Detector Frontend |
 
 ---
 
@@ -123,6 +136,6 @@ Learning-Motion-Detection/
 │   └── frontend/           ← React app
 ├── social-distancing-detector/
 │   ├── backend/            ← FastAPI + detector + tracker
-│   └── frontend/           ← React app (scaffold)
+│   └── frontend/           ← React (Vite) + Tailwind UI
 └── README.md
 ```
