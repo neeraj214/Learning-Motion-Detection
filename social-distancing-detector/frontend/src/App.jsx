@@ -3,6 +3,7 @@ import useStatus from './hooks/useStatus';
 import StatusBanner from './components/StatusBanner';
 import StatsPanel from './components/StatsPanel';
 import VideoFeed from './components/VideoFeed';
+import ConnectionGuard from './components/ConnectionGuard';
 
 export default function App() {
   const data = useStatus();
@@ -13,7 +14,8 @@ export default function App() {
   else if (data.alarm_state === "alarm") dotColor = "bg-red-500 animate-pulse";
 
   return (
-    <div className="min-h-screen bg-gray-950 text-white flex flex-col font-sans">
+    <ConnectionGuard fps={data.fps}>
+      <div className="min-h-screen bg-gray-950 text-white flex flex-col font-sans">
       
       {/* 1. Header */}
       <header className="bg-gray-900/80 backdrop-blur border-b border-gray-800 px-6 py-3 flex items-center gap-3 sticky top-0 z-10 shadow-sm">
@@ -78,6 +80,7 @@ export default function App() {
         neeraj214 · Social Distancing Detector · MOG2 Background Subtraction
       </footer>
       
-    </div>
+      </div>
+    </ConnectionGuard>
   );
 }
