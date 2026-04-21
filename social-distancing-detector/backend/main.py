@@ -35,7 +35,7 @@ def video_feed():
         media_type="multipart/x-mixed-replace; boundary=frame"
     )
 
-@app.get("/stats")
+@app.get("/status")
 def get_stats():
     frame = camera.read_frame()
     if frame is None:
