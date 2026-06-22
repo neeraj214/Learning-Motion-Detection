@@ -139,3 +139,11 @@ Learning-Motion-Detection/
 │   └── frontend/           ← React (Vite) + Tailwind UI
 └── README.md
 ```
+
+---
+
+## 🚫 Why This Project Is Not Deployed Online
+
+- **Local Hardware Dependencies**: The system relies on local webcam capture (`cv2.VideoCapture(0)`) using OpenCV to perform real-time motion detection and social distancing tracking, which cannot be hosted on public web servers.
+- **Local Host Execution**: The Flask and FastAPI backend servers are configured to run on `localhost` to stream frame feeds locally to React frontends.
+
